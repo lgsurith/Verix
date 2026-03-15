@@ -257,6 +257,10 @@ export async function linkInstallation(
   `;
 }
 
+export async function removeInstallation(installationId: number): Promise<void> {
+  await sql`DELETE FROM installations WHERE installation_id = ${installationId}`;
+}
+
 export async function getUserByInstallationId(installationId: number): Promise<DbUser | null> {
   const rows = await sql`
     SELECT u.* FROM users u

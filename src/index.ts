@@ -29,6 +29,7 @@ import {
   getIndexedFiles,
   getUserByInstallationId,
   linkInstallation,
+  removeInstallation,
   upsertUser,
 } from "./db/index.js";
 import type { DbUser } from "./db/index.js";
@@ -119,6 +120,21 @@ app.webhooks.on("installation.created", async ({ payload, octokit }) => {
   for (const repo of repos) {
     const [owner, name] = repo.full_name.split("/") as [string, string];
     indexRepo(octokit, owner, name).catch(() => {});
+  }
+});
+
+// Clean up when the app is uninstalled
+app.webhooks.on("installation.deleted", async ({ payload }) => {
+  const installationId = payload.installation.id;
+  const sender = payload.sender;
+
+  console.log(`[verix] App uninstalled by @${sender.login} (installation ${installationId})`);
+
+  try {
+    await removeInstallation(installationId);
+    console.log(`[verix] Removed installation ${installationId}`);
+  } catch (error) {
+    console.error("[verix] Failed to clean up installation:", error);
   }
 });
 
