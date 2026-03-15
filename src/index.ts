@@ -6,6 +6,8 @@ import SmeeClient from "smee-client";
 import fs from "fs";
 import { getPRFiles, postPRReview, postReviewComment } from "./github.js";
 import { getAdapter, getAgentAdapter } from "./adapters/base.js";
+import type { InferenceAdapter } from "./adapters/base.js";
+import type { AgentAdapter } from "./agent/loop.js";
 import { reviewPR } from "./review.js";
 import type { OctokitClient } from "./types.js";
 import { buildDepGraph } from "./indexer/depgraph.js";
@@ -24,7 +26,11 @@ import {
   loadGraphFromDb,
   getRepoByName,
   getIndexedFiles,
+  getUserByInstallationId,
+  linkInstallation,
+  upsertUser,
 } from "./db/index.js";
+import type { DbUser } from "./db/index.js";
 import { fetchFileContent, parseImports } from "./indexer/depgraph.js";
 
 function requireEnv(key: string): string {
@@ -88,10 +94,26 @@ async function indexRepo(
   }
 }
 
-// Index repos when the app is installed
+// Index repos and link user when the app is installed
 app.webhooks.on("installation.created", async ({ payload, octokit }) => {
   const repos = payload.repositories ?? [];
-  console.log(`[verix] App installed on ${repos.length} repo(s)`);
+  const sender = payload.sender;
+  const installationId = payload.installation.id;
+
+  console.log(`[verix] App installed by @${sender.login} on ${repos.length} repo(s)`);
+
+  // Create/update user and link installation
+  try {
+    const user = await upsertUser(
+      sender.id,
+      sender.login,
+      sender.avatar_url ?? null
+    );
+    await linkInstallation(installationId, user.id);
+    console.log(`[verix] Linked installation ${installationId} to user @${sender.login}`);
+  } catch (error) {
+    console.error("[verix] Failed to link installation to user:", error);
+  }
 
   for (const repo of repos) {
     const [owner, name] = repo.full_name.split("/") as [string, string];
@@ -188,12 +210,46 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
 
 // --- Core review logic (shared by PR events and /verix review command) ---
 
+async function resolveUserConfig(installationId?: number): Promise<{
+  userProvider: string;
+  userAdapter: InferenceAdapter;
+  userAgentAdapter: AgentAdapter | null;
+}> {
+  // Try to find user-specific config from the installation
+  if (installationId) {
+    try {
+      const user = await getUserByInstallationId(installationId);
+      if (user?.model_provider && user?.api_key_encrypted) {
+        const userProvider = user.model_provider;
+        const userKey = user.api_key_encrypted; // TODO: decrypt in production
+        const useAgentMode = process.env.VERIX_AGENT_MODE !== "false";
+        console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
+        return {
+          userProvider,
+          userAdapter: getAdapter(userProvider, { apiKey: userKey }),
+          userAgentAdapter: useAgentMode ? getAgentAdapter(userProvider, { apiKey: userKey }) : null,
+        };
+      }
+    } catch (error) {
+      console.error("[verix] Failed to resolve user config:", error);
+    }
+  }
+
+  // Fallback to global config from .env
+  return {
+    userProvider: provider,
+    userAdapter: adapter,
+    userAgentAdapter: agentAdapter,
+  };
+}
+
 async function runReview(
   octokit: OctokitClient,
   owner: string,
   repo: string,
   prNumber: number,
-  ref: string
+  ref: string,
+  installationId?: number
 ): Promise<void> {
   const fullName = `${owner}/${repo}`;
   const files = await getPRFiles(octokit, owner, repo, prNumber);
@@ -202,6 +258,9 @@ async function runReview(
     console.log("[verix] No reviewable changes found");
     return;
   }
+
+  // Resolve which model/key to use (user's BYOK or default)
+  const { userProvider, userAdapter, userAgentAdapter } = await resolveUserConfig(installationId);
 
   // Load graph from Neon (source of truth)
   let repoId: string | null = null;
@@ -230,11 +289,11 @@ async function runReview(
   let summary: string;
   let comments: import("./review.js").ReviewComment[];
 
-  if (agentAdapter) {
+  if (userAgentAdapter) {
     const toolCtx: ToolContext = { octokit, owner, repo, ref, graph, repoId };
-    console.log(`[verix] Agent reviewing ${files.length} file(s) with ${provider}...`);
+    console.log(`[verix] Agent reviewing ${files.length} file(s) with ${userProvider}...`);
     ({ summary, comments } = await agentReview(
-      agentAdapter,
+      userAgentAdapter,
       files,
       toolCtx,
       customRules || undefined,
@@ -247,8 +306,8 @@ async function runReview(
       contextFiles = await crawlContext(octokit, owner, repo, ref, changedPaths, graph, indexedFiles);
       console.log(`[verix] Found ${contextFiles.length} related file(s) for context`);
     }
-    console.log(`[verix] Reviewing ${files.length} file(s) with ${provider}...`);
-    ({ summary, comments } = await reviewPR(adapter, files, contextFiles));
+    console.log(`[verix] Reviewing ${files.length} file(s) with ${userProvider}...`);
+    ({ summary, comments } = await reviewPR(userAdapter, files, contextFiles));
   }
 
   if (comments.length > 0) {
@@ -280,7 +339,7 @@ app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.s
   console.log(`[verix] PR #${prNumber} opened on ${fullName}`);
 
   try {
-    await runReview(octokit, owner, repo, prNumber, pull_request.head.ref);
+    await runReview(octokit, owner, repo, prNumber, pull_request.head.ref, payload.installation?.id);
   } catch (error) {
     console.error(`[verix] Error reviewing PR #${prNumber}:`, error);
   }
@@ -312,7 +371,7 @@ app.webhooks.on("issue_comment.created", async ({ payload, octokit }) => {
     });
 
     const ref = (pr as { head: { ref: string } }).head.ref;
-    await runReview(octokit, owner, repo, prNumber, ref);
+    await runReview(octokit, owner, repo, prNumber, ref, payload.installation?.id);
   } catch (error) {
     console.error(`[verix] Error reviewing PR #${prNumber} from comment:`, error);
     // Post error as comment so user knows

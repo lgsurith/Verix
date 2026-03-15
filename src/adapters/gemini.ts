@@ -36,10 +36,10 @@ interface GeminiResponse {
 export class GeminiAdapter implements InferenceAdapter, AgentAdapter {
   private apiKey: string;
 
-  constructor() {
-    this.apiKey = process.env.GEMINI_API_KEY || "";
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey ?? process.env.GEMINI_API_KEY ?? "";
     if (!this.apiKey) {
-      throw new Error("[verix] GEMINI_API_KEY is not set in .env");
+      throw new Error("[verix] GEMINI_API_KEY is not set");
     }
   }
 

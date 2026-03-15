@@ -40,6 +40,27 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_edges_source ON file_edges(repo_id, source)
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      github_id          INT UNIQUE NOT NULL,
+      login              TEXT NOT NULL,
+      avatar_url         TEXT,
+      api_key_encrypted  TEXT,
+      model_provider     TEXT,
+      created_at         TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS installations (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id           UUID REFERENCES users(id) ON DELETE CASCADE,
+      installation_id   INT UNIQUE NOT NULL,
+      created_at        TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
   console.log("[verix] Database initialized");
 }
 
@@ -163,6 +184,75 @@ export async function getRepoByName(fullName: string): Promise<{ id: string; sta
   `;
   if (rows.length === 0) return null;
   return { id: rows[0].id as string, status: rows[0].status as string };
+}
+
+// --- User operations ---
+
+export interface DbUser {
+  id: string;
+  github_id: number;
+  login: string;
+  avatar_url: string | null;
+  api_key_encrypted: string | null;
+  model_provider: string | null;
+}
+
+export async function upsertUser(
+  githubId: number,
+  login: string,
+  avatarUrl: string | null
+): Promise<DbUser> {
+  const rows = await sql`
+    INSERT INTO users (github_id, login, avatar_url)
+    VALUES (${githubId}, ${login}, ${avatarUrl})
+    ON CONFLICT (github_id) DO UPDATE SET login = ${login}, avatar_url = ${avatarUrl}
+    RETURNING *
+  `;
+  return rows[0] as unknown as DbUser;
+}
+
+export async function getUserById(userId: string): Promise<DbUser | null> {
+  const rows = await sql`SELECT * FROM users WHERE id = ${userId}`;
+  return rows.length > 0 ? (rows[0] as unknown as DbUser) : null;
+}
+
+export async function getUserByGithubId(githubId: number): Promise<DbUser | null> {
+  const rows = await sql`SELECT * FROM users WHERE github_id = ${githubId}`;
+  return rows.length > 0 ? (rows[0] as unknown as DbUser) : null;
+}
+
+export async function updateUserApiKey(
+  userId: string,
+  provider: string,
+  encryptedKey: string
+): Promise<void> {
+  await sql`
+    UPDATE users
+    SET model_provider = ${provider}, api_key_encrypted = ${encryptedKey}
+    WHERE id = ${userId}
+  `;
+}
+
+// --- Installation operations ---
+
+export async function linkInstallation(
+  installationId: number,
+  userId: string
+): Promise<void> {
+  await sql`
+    INSERT INTO installations (installation_id, user_id)
+    VALUES (${installationId}, ${userId})
+    ON CONFLICT (installation_id) DO UPDATE SET user_id = ${userId}
+  `;
+}
+
+export async function getUserByInstallationId(installationId: number): Promise<DbUser | null> {
+  const rows = await sql`
+    SELECT u.* FROM users u
+    JOIN installations i ON i.user_id = u.id
+    WHERE i.installation_id = ${installationId}
+  `;
+  return rows.length > 0 ? (rows[0] as unknown as DbUser) : null;
 }
 
 export async function getIndexedFiles(repoId: string): Promise<Set<string>> {

@@ -39,10 +39,10 @@ export class OpenAIAdapter implements InferenceAdapter, AgentAdapter {
   private apiKey: string;
   private model: string;
 
-  constructor() {
-    this.apiKey = process.env.OPENAI_API_KEY || "";
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? "";
     if (!this.apiKey) {
-      throw new Error("[verix] OPENAI_API_KEY is not set in .env");
+      throw new Error("[verix] OPENAI_API_KEY is not set");
     }
     this.model = process.env.OPENAI_MODEL || "gpt-4o";
   }
