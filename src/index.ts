@@ -138,6 +138,38 @@ app.webhooks.on("installation.deleted", async ({ payload }) => {
   }
 });
 
+// Clean up when repos are removed from the installation
+app.webhooks.on("installation_repositories.removed", async ({ payload }) => {
+  const removed = payload.repositories_removed ?? [];
+
+  for (const repo of removed) {
+    const fullName = repo.full_name;
+    console.log(`[verix] Repo ${fullName} removed from installation`);
+
+    try {
+      const dbRepo = await getRepoByName(fullName);
+      if (dbRepo) {
+        await deleteAllEdges(dbRepo.id);
+        await dbSetStatus(fullName, "removed");
+        console.log(`[verix] Cleaned up dep graph for ${fullName}`);
+      }
+    } catch (error) {
+      console.error(`[verix] Failed to clean up ${fullName}:`, error);
+    }
+  }
+});
+
+// Index new repos added to existing installation
+app.webhooks.on("installation_repositories.added", async ({ payload, octokit }) => {
+  const added = payload.repositories_added ?? [];
+
+  for (const repo of added) {
+    const [owner, name] = repo.full_name.split("/") as [string, string];
+    console.log(`[verix] Repo ${repo.full_name} added to installation`);
+    indexRepo(octokit, owner, name).catch(() => {});
+  }
+});
+
 // Partial re-index on push to default branch
 app.webhooks.on("push", async ({ payload, octokit }) => {
   const { repository, ref, commits } = payload;
