@@ -211,50 +211,48 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
 
 // --- Core review logic (shared by PR events and /verix review command) ---
 
-async function resolveUserConfig(installationId?: number): Promise<{
+interface UserConfig {
   userProvider: string;
   userAdapter: InferenceAdapter;
   userAgentAdapter: AgentAdapter | null;
   userReviewRules: string | null;
-}> {
-  if (installationId) {
-    try {
-      const user = await getUserByInstallationId(installationId);
-      if (user) {
-        const useAgentMode = process.env.VERIX_AGENT_MODE !== "false";
+}
 
-        // If user has their own API key, decrypt and use it
-        if (user.model_provider && user.api_key_encrypted) {
-          const userProvider = user.model_provider;
-          const userKey = decrypt(user.api_key_encrypted);
-          console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
-          return {
-            userProvider,
-            userAdapter: getAdapter(userProvider, { apiKey: userKey }),
-            userAgentAdapter: useAgentMode ? getAgentAdapter(userProvider, { apiKey: userKey }) : null,
-            userReviewRules: user.review_rules,
-          };
-        }
-
-        // User exists but no key — use default adapter, still return their rules
-        return {
-          userProvider: provider,
-          userAdapter: adapter,
-          userAgentAdapter: agentAdapter,
-          userReviewRules: user.review_rules,
-        };
-      }
-    } catch (error) {
-      console.error("[verix] Failed to resolve user config:", error);
-    }
+async function resolveUserConfig(installationId?: number): Promise<UserConfig | null> {
+  if (!installationId) {
+    console.log("[verix] No installation ID — cannot identify user");
+    return null;
   }
 
-  return {
-    userProvider: provider,
-    userAdapter: adapter,
-    userAgentAdapter: agentAdapter,
-    userReviewRules: null,
-  };
+  try {
+    const user = await getUserByInstallationId(installationId);
+
+    if (!user) {
+      console.log("[verix] No user found for this installation");
+      return null;
+    }
+
+    if (!user.model_provider || !user.api_key_encrypted) {
+      console.log(`[verix] @${user.login} has no API key configured`);
+      return null;
+    }
+
+    const userProvider = user.model_provider;
+    const userKey = decrypt(user.api_key_encrypted);
+    const useAgentMode = process.env.VERIX_AGENT_MODE !== "false";
+
+    console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
+
+    return {
+      userProvider,
+      userAdapter: getAdapter(userProvider, { apiKey: userKey }),
+      userAgentAdapter: useAgentMode ? getAgentAdapter(userProvider, { apiKey: userKey }) : null,
+      userReviewRules: user.review_rules,
+    };
+  } catch (error) {
+    console.error("[verix] Failed to resolve user config:", error);
+    return null;
+  }
 }
 
 async function runReview(
@@ -273,8 +271,17 @@ async function runReview(
     return;
   }
 
-  // Resolve which model/key to use (user's BYOK or default)
-  const { userProvider, userAdapter, userAgentAdapter, userReviewRules } = await resolveUserConfig(installationId);
+  // Resolve user's BYOK config — no key means no review
+  const userConfig = await resolveUserConfig(installationId);
+  if (!userConfig) {
+    await postReviewComment(
+      octokit, owner, repo, prNumber,
+      "**Verix** — No API key configured. Please go to your [Verix dashboard](https://verix.in/dashboard/settings) to set up your model provider and API key."
+    );
+    console.log(`[verix] Skipped PR #${prNumber} — no API key configured`);
+    return;
+  }
+  const { userProvider, userAdapter, userAgentAdapter, userReviewRules } = userConfig;
 
   // Load graph from Neon (source of truth)
   let repoId: string | null = null;
