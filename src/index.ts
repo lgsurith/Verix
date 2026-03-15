@@ -2,7 +2,7 @@ import "dotenv/config";
 import { createServer } from "node:http";
 import { App } from "@octokit/app";
 import { createNodeMiddleware } from "@octokit/webhooks";
-import SmeeClient from "smee-client";
+// smee-client loaded dynamically — only used in local dev
 import fs from "fs";
 import { getPRFiles, postPRReview, postReviewComment } from "./github.js";
 import { getAdapter, getAgentAdapter } from "./adapters/base.js";
@@ -426,6 +426,7 @@ server.listen(PORT, async () => {
   }
 
   if (process.env.WEBHOOK_PROXY_URL) {
+    const { default: SmeeClient } = await import("smee-client");
     const smee = new SmeeClient({
       source: process.env.WEBHOOK_PROXY_URL,
       target: `http://localhost:${PORT}/api/webhook`,
