@@ -205,7 +205,7 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
   }
 });
 
-app.webhooks.on("pull_request.opened", async ({ payload, octokit }) => {
+app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"], async ({ payload, octokit }) => {
   const { repository, pull_request } = payload;
   const owner = repository.owner.login;
   const repo = repository.name;
