@@ -127,3 +127,49 @@ export async function getDependents(repoId: string, filePath: string): Promise<s
   `;
   return rows.map((r) => r.source as string);
 }
+
+// --- Load full graph from DB ---
+
+export interface DbDepGraph {
+  forward: Record<string, string[]>;
+  reverse: Record<string, string[]>;
+}
+
+export async function loadGraphFromDb(repoId: string): Promise<DbDepGraph> {
+  const rows = await sql`
+    SELECT source, target FROM file_edges WHERE repo_id = ${repoId}
+  `;
+
+  const forward: Record<string, string[]> = {};
+  const reverse: Record<string, string[]> = {};
+
+  for (const row of rows) {
+    const source = row.source as string;
+    const target = row.target as string;
+
+    if (!forward[source]) forward[source] = [];
+    forward[source]!.push(target);
+
+    if (!reverse[target]) reverse[target] = [];
+    reverse[target]!.push(source);
+  }
+
+  return { forward, reverse };
+}
+
+export async function getRepoByName(fullName: string): Promise<{ id: string; status: string } | null> {
+  const rows = await sql`
+    SELECT id, status FROM repos WHERE full_name = ${fullName}
+  `;
+  if (rows.length === 0) return null;
+  return { id: rows[0].id as string, status: rows[0].status as string };
+}
+
+export async function getIndexedFiles(repoId: string): Promise<Set<string>> {
+  const rows = await sql`
+    SELECT DISTINCT source FROM file_edges WHERE repo_id = ${repoId}
+    UNION
+    SELECT DISTINCT target FROM file_edges WHERE repo_id = ${repoId}
+  `;
+  return new Set(rows.map((r) => r.source as string));
+}

@@ -10,7 +10,7 @@ import { reviewPR } from "./review.js";
 import type { OctokitClient } from "./types.js";
 import { buildDepGraph } from "./indexer/depgraph.js";
 import { crawlContext } from "./indexer/crawler.js";
-import { getRepoIndex, setRepoIndex, setRepoStatus as memSetStatus, isReady } from "./indexer/store.js";
+// In-memory store kept for backwards compat — Neon is source of truth
 import { agentReview } from "./agent/loop.js";
 import type { ToolContext } from "./agent/tools.js";
 import { loadRepoConfig, buildRulesPrompt } from "./config.js";
@@ -21,6 +21,9 @@ import {
   storeEdges,
   deleteAllEdges,
   deleteEdgesForFiles,
+  loadGraphFromDb,
+  getRepoByName,
+  getIndexedFiles,
 } from "./db/index.js";
 import { fetchFileContent, parseImports } from "./indexer/depgraph.js";
 
@@ -59,17 +62,15 @@ async function indexRepo(
   ref: string = "HEAD"
 ): Promise<void> {
   const fullName = `${owner}/${repo}`;
-  memSetStatus(fullName, "indexing");
 
   try {
+    const repoId = await getOrCreateRepo(fullName);
+    await dbSetStatus(fullName, "indexing");
+
     console.log(`[verix] Indexing ${fullName}...`);
     const { graph, files } = await buildDepGraph(octokit, owner, repo, ref);
 
-    // Store in memory (fast path)
-    setRepoIndex(fullName, ref, graph, files);
-
     // Persist to Neon
-    const repoId = await getOrCreateRepo(fullName);
     await deleteAllEdges(repoId);
     const edges: Array<{ source: string; target: string }> = [];
     for (const [source, targets] of Object.entries(graph.forward)) {
@@ -83,7 +84,6 @@ async function indexRepo(
     console.log(`[verix] Index ready for ${fullName} (${files.size} files, ${edges.length} edges persisted)`);
   } catch (error) {
     console.error(`[verix] Failed to index ${fullName}:`, error);
-    memSetStatus(fullName, "failed");
     await dbSetStatus(fullName, "failed").catch(() => {});
   }
 }
@@ -128,54 +128,42 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
 
   const changedFiles = [...added, ...modified, ...removed];
 
-  // If no index exists yet, do a full index
-  const repoIndex = getRepoIndex(fullName);
-  if (!repoIndex) {
-    console.log(`[verix] No existing index for ${fullName}, running full index...`);
-    indexRepo(octokit, owner, repo).catch(() => {});
-    return;
-  }
-
   console.log(
     `[verix] Push to ${defaultBranch} on ${fullName}: ` +
     `${added.size} added, ${modified.size} modified, ${removed.size} removed`
   );
 
   try {
-    const repoId = await getOrCreateRepo(fullName);
+    const dbRepo = await getRepoByName(fullName);
 
-    // 1. Remove old edges for all changed/removed files
-    await deleteEdgesForFiles(repoId, changedFiles);
-
-    // 2. Remove from in-memory graph
-    for (const file of changedFiles) {
-      delete repoIndex.graph.forward[file];
-      // Clean up reverse edges pointing to this file
-      for (const deps of Object.values(repoIndex.graph.reverse)) {
-        const idx = deps.indexOf(file);
-        if (idx !== -1) deps.splice(idx, 1);
-      }
-      delete repoIndex.graph.reverse[file];
+    // No repo in DB yet — full index
+    if (!dbRepo) {
+      console.log(`[verix] No existing index for ${fullName}, running full index...`);
+      indexRepo(octokit, owner, repo).catch(() => {});
+      return;
     }
 
-    // 3. Fetch + parse only the files that still exist (added + modified)
+    const repoId = dbRepo.id;
+
+    // 1. Delete old edges for changed/removed files
+    await deleteEdgesForFiles(repoId, changedFiles);
+
+    // 2. Fetch + parse only files that still exist (added + modified)
     const filesToParse = [...added, ...modified].filter(
       (f) => /\.(ts|tsx|js|jsx|py)$/.test(f)
     );
+
+    // Get known files from DB for import resolution
+    const knownFiles = await getIndexedFiles(repoId);
+    for (const f of added) knownFiles.add(f);
 
     const newEdges: Array<{ source: string; target: string }> = [];
 
     for (const filePath of filesToParse) {
       try {
         const content = await fetchFileContent(octokit, owner, repo, filePath, defaultBranch);
-        repoIndex.files.add(filePath);
-        const imports = parseImports(content, filePath, repoIndex.files);
-
-        // Update in-memory graph
-        repoIndex.graph.forward[filePath] = imports;
+        const imports = parseImports(content, filePath, knownFiles);
         for (const dep of imports) {
-          if (!repoIndex.graph.reverse[dep]) repoIndex.graph.reverse[dep] = [];
-          repoIndex.graph.reverse[dep]!.push(filePath);
           newEdges.push({ source: filePath, target: dep });
         }
       } catch {
@@ -183,15 +171,9 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
       }
     }
 
-    // 4. Remove deleted files from the file set
-    for (const file of removed) {
-      repoIndex.files.delete(file);
-    }
-
-    // 5. Persist new edges to Neon
+    // 3. Persist new edges to Neon
     await storeEdges(repoId, newEdges);
     await dbSetStatus(fullName, "ready", payload.after);
-    repoIndex.status = "ready";
 
     console.log(
       `[verix] Partial re-index done for ${fullName}: ` +
@@ -199,7 +181,6 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
     );
   } catch (error) {
     console.error(`[verix] Partial re-index failed for ${fullName}:`, error);
-    // Fallback to full re-index
     console.log(`[verix] Falling back to full re-index...`);
     indexRepo(octokit, owner, repo).catch(() => {});
   }
@@ -230,9 +211,27 @@ app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.s
       return;
     }
 
-    const repoIndex = getRepoIndex(fullName);
-    const graph = repoIndex && isReady(fullName) ? repoIndex.graph : null;
     const ref = pull_request.head.ref;
+
+    // Load graph from Neon (source of truth)
+    let repoId: string | null = null;
+    let graph: import("./indexer/depgraph.js").DepGraph | null = null;
+    let indexedFiles: Set<string> | null = null;
+
+    try {
+      const dbRepo = await getRepoByName(fullName);
+      if (dbRepo && dbRepo.status === "ready") {
+        repoId = dbRepo.id;
+        graph = await loadGraphFromDb(dbRepo.id);
+        indexedFiles = await getIndexedFiles(dbRepo.id);
+        const edgeCount = Object.values(graph.forward).reduce((sum, deps) => sum + deps.length, 0);
+        console.log(`[verix] Loaded dep graph from DB (${edgeCount} edges)`);
+      } else {
+        console.log(`[verix] No index in DB for ${fullName}, reviewing without dep context`);
+      }
+    } catch (error) {
+      console.error(`[verix] Failed to load graph from DB:`, error);
+    }
 
     // Load repo-specific config (VERIX.md, .verix.yml)
     const config = await loadRepoConfig(octokit, owner, repo, ref);
@@ -243,12 +242,6 @@ app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.s
 
     if (agentAdapter) {
       // Agentic mode — AI explores the codebase via tools
-      let repoId: string | null = null;
-      try {
-        repoId = await getOrCreateRepo(fullName);
-      } catch {
-        // DB unavailable, agent will use in-memory graph
-      }
       const toolCtx: ToolContext = { octokit, owner, repo, ref, graph, repoId };
       console.log(`[verix] Agent reviewing ${files.length} file(s) with ${provider}...`);
       ({ summary, comments } = await agentReview(
@@ -261,12 +254,10 @@ app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.s
     } else {
       // One-shot mode — pre-crawl context and send in one prompt
       let contextFiles;
-      if (repoIndex && graph) {
+      if (graph && indexedFiles) {
         const changedPaths = files.map((f) => f.filename);
-        contextFiles = await crawlContext(octokit, owner, repo, ref, changedPaths, graph, repoIndex.files);
+        contextFiles = await crawlContext(octokit, owner, repo, ref, changedPaths, graph, indexedFiles);
         console.log(`[verix] Found ${contextFiles.length} related file(s) for context`);
-      } else {
-        console.log(`[verix] No index available for ${fullName}, reviewing without dep context`);
       }
       console.log(`[verix] Reviewing ${files.length} file(s) with ${provider}...`);
       ({ summary, comments } = await reviewPR(adapter, files, contextFiles));
