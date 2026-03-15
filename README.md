@@ -30,7 +30,9 @@ PR changes auth.ts
 
 ## Quick start
 
-### 1. Create a GitHub App
+### 1. Create your own GitHub App
+
+Each Verix instance needs its own GitHub App — this is how GitHub authenticates webhooks and API access for your repos.
 
 Go to [github.com/settings/apps/new](https://github.com/settings/apps/new) and create an app with:
 
