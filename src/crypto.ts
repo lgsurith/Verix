@@ -1,8 +1,6 @@
 import crypto from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 16;
-const AUTH_TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
@@ -12,21 +10,19 @@ function getEncryptionKey(): Buffer {
 
 export function decrypt(encrypted: string): string {
   const key = getEncryptionKey();
-  const parts = encrypted.split(":");
+  const [ivHex, authTagHex, ciphertext] = encrypted.split(":");
 
-  if (parts.length !== 3) {
+  if (!ivHex || !authTagHex || !ciphertext) {
     throw new Error("[verix] Invalid encrypted format (expected iv:authTag:ciphertext)");
   }
 
-  const iv = Buffer.from(parts[0]!, "hex");
-  const authTag = Buffer.from(parts[1]!, "hex");
-  const ciphertext = Buffer.from(parts[2]!, "hex");
-
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
 
-  let decrypted = decipher.update(ciphertext);
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  let decrypted = decipher.update(ciphertext, "hex", "utf8");
+  decrypted += decipher.final("utf8");
 
-  return decrypted.toString("utf8");
+  return decrypted;
 }
