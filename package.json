@@ -8,7 +8,12 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
-  "keywords": ["code-review", "ai", "github-app", "dependency-graph"],
+  "keywords": [
+    "code-review",
+    "ai",
+    "github-app",
+    "dependency-graph"
+  ],
   "author": "Surith",
   "license": "MIT",
   "type": "module",
@@ -19,7 +24,6 @@
     "@octokit/rest": "^22.0.1",
     "@octokit/webhooks": "^14.2.0",
     "dotenv": "^17.3.1",
-    "express": "^5.2.1",
     "smee-client": "^5.0.0"
   },
   "pnpm": {
@@ -28,7 +32,6 @@
     ]
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
