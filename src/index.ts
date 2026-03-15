@@ -16,6 +16,7 @@ import { crawlContext } from "./indexer/crawler.js";
 import { agentReview } from "./agent/loop.js";
 import type { ToolContext } from "./agent/tools.js";
 import { loadRepoConfig, buildRulesPrompt } from "./config.js";
+import { decrypt } from "./crypto.js";
 import {
   initDb,
   getOrCreateRepo,
@@ -222,10 +223,10 @@ async function resolveUserConfig(installationId?: number): Promise<{
       if (user) {
         const useAgentMode = process.env.VERIX_AGENT_MODE !== "false";
 
-        // If user has their own API key, use it
+        // If user has their own API key, decrypt and use it
         if (user.model_provider && user.api_key_encrypted) {
           const userProvider = user.model_provider;
-          const userKey = user.api_key_encrypted; // TODO: decrypt in production
+          const userKey = decrypt(user.api_key_encrypted);
           console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
           return {
             userProvider,
