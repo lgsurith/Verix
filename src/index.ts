@@ -186,6 +186,82 @@ app.webhooks.on("push", async ({ payload, octokit }) => {
   }
 });
 
+// --- Core review logic (shared by PR events and /verix review command) ---
+
+async function runReview(
+  octokit: OctokitClient,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  ref: string
+): Promise<void> {
+  const fullName = `${owner}/${repo}`;
+  const files = await getPRFiles(octokit, owner, repo, prNumber);
+
+  if (!files.some((f) => f.patch)) {
+    console.log("[verix] No reviewable changes found");
+    return;
+  }
+
+  // Load graph from Neon (source of truth)
+  let repoId: string | null = null;
+  let graph: import("./indexer/depgraph.js").DepGraph | null = null;
+  let indexedFiles: Set<string> | null = null;
+
+  try {
+    const dbRepo = await getRepoByName(fullName);
+    if (dbRepo && dbRepo.status === "ready") {
+      repoId = dbRepo.id;
+      graph = await loadGraphFromDb(dbRepo.id);
+      indexedFiles = await getIndexedFiles(dbRepo.id);
+      const edgeCount = Object.values(graph.forward).reduce((sum, deps) => sum + deps.length, 0);
+      console.log(`[verix] Loaded dep graph from DB (${edgeCount} edges)`);
+    } else {
+      console.log(`[verix] No index in DB for ${fullName}, reviewing without dep context`);
+    }
+  } catch (error) {
+    console.error(`[verix] Failed to load graph from DB:`, error);
+  }
+
+  // Load repo-specific config (VERIX.md, .verix.yml)
+  const config = await loadRepoConfig(octokit, owner, repo, ref);
+  const customRules = buildRulesPrompt(config);
+
+  let summary: string;
+  let comments: import("./review.js").ReviewComment[];
+
+  if (agentAdapter) {
+    const toolCtx: ToolContext = { octokit, owner, repo, ref, graph, repoId };
+    console.log(`[verix] Agent reviewing ${files.length} file(s) with ${provider}...`);
+    ({ summary, comments } = await agentReview(
+      agentAdapter,
+      files,
+      toolCtx,
+      customRules || undefined,
+      config.settings.ignore
+    ));
+  } else {
+    let contextFiles;
+    if (graph && indexedFiles) {
+      const changedPaths = files.map((f) => f.filename);
+      contextFiles = await crawlContext(octokit, owner, repo, ref, changedPaths, graph, indexedFiles);
+      console.log(`[verix] Found ${contextFiles.length} related file(s) for context`);
+    }
+    console.log(`[verix] Reviewing ${files.length} file(s) with ${provider}...`);
+    ({ summary, comments } = await reviewPR(adapter, files, contextFiles));
+  }
+
+  if (comments.length > 0) {
+    await postPRReview(octokit, owner, repo, prNumber, summary, comments);
+  } else {
+    await postReviewComment(octokit, owner, repo, prNumber, summary);
+  }
+
+  console.log(`[verix] Review posted on PR #${prNumber} (${comments.length} issue(s))`);
+}
+
+// --- PR events ---
+
 app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"], async ({ payload, octokit }) => {
   const { repository, pull_request } = payload;
   const owner = repository.owner.login;
@@ -204,74 +280,46 @@ app.webhooks.on(["pull_request.opened", "pull_request.reopened", "pull_request.s
   console.log(`[verix] PR #${prNumber} opened on ${fullName}`);
 
   try {
-    const files = await getPRFiles(octokit, owner, repo, prNumber);
-
-    if (!files.some((f) => f.patch)) {
-      console.log("[verix] No reviewable changes found");
-      return;
-    }
-
-    const ref = pull_request.head.ref;
-
-    // Load graph from Neon (source of truth)
-    let repoId: string | null = null;
-    let graph: import("./indexer/depgraph.js").DepGraph | null = null;
-    let indexedFiles: Set<string> | null = null;
-
-    try {
-      const dbRepo = await getRepoByName(fullName);
-      if (dbRepo && dbRepo.status === "ready") {
-        repoId = dbRepo.id;
-        graph = await loadGraphFromDb(dbRepo.id);
-        indexedFiles = await getIndexedFiles(dbRepo.id);
-        const edgeCount = Object.values(graph.forward).reduce((sum, deps) => sum + deps.length, 0);
-        console.log(`[verix] Loaded dep graph from DB (${edgeCount} edges)`);
-      } else {
-        console.log(`[verix] No index in DB for ${fullName}, reviewing without dep context`);
-      }
-    } catch (error) {
-      console.error(`[verix] Failed to load graph from DB:`, error);
-    }
-
-    // Load repo-specific config (VERIX.md, .verix.yml)
-    const config = await loadRepoConfig(octokit, owner, repo, ref);
-    const customRules = buildRulesPrompt(config);
-
-    let summary: string;
-    let comments: import("./review.js").ReviewComment[];
-
-    if (agentAdapter) {
-      // Agentic mode — AI explores the codebase via tools
-      const toolCtx: ToolContext = { octokit, owner, repo, ref, graph, repoId };
-      console.log(`[verix] Agent reviewing ${files.length} file(s) with ${provider}...`);
-      ({ summary, comments } = await agentReview(
-        agentAdapter,
-        files,
-        toolCtx,
-        customRules || undefined,
-        config.settings.ignore
-      ));
-    } else {
-      // One-shot mode — pre-crawl context and send in one prompt
-      let contextFiles;
-      if (graph && indexedFiles) {
-        const changedPaths = files.map((f) => f.filename);
-        contextFiles = await crawlContext(octokit, owner, repo, ref, changedPaths, graph, indexedFiles);
-        console.log(`[verix] Found ${contextFiles.length} related file(s) for context`);
-      }
-      console.log(`[verix] Reviewing ${files.length} file(s) with ${provider}...`);
-      ({ summary, comments } = await reviewPR(adapter, files, contextFiles));
-    }
-
-    if (comments.length > 0) {
-      await postPRReview(octokit, owner, repo, prNumber, summary, comments);
-    } else {
-      await postReviewComment(octokit, owner, repo, prNumber, summary);
-    }
-
-    console.log(`[verix] Review posted on PR #${prNumber} (${comments.length} issue(s))`);
+    await runReview(octokit, owner, repo, prNumber, pull_request.head.ref);
   } catch (error) {
     console.error(`[verix] Error reviewing PR #${prNumber}:`, error);
+  }
+});
+
+// --- /verix review command via PR comment ---
+
+app.webhooks.on("issue_comment.created", async ({ payload, octokit }) => {
+  const { comment, issue, repository } = payload;
+
+  // Only respond to /verix review on pull requests
+  if (!issue.pull_request) return;
+  const body = comment.body.trim().toLowerCase();
+  if (body !== "/verix review" && body !== "/verix") return;
+
+  const owner = repository.owner.login;
+  const repo = repository.name;
+  const prNumber = issue.number;
+  const fullName = `${owner}/${repo}`;
+
+  console.log(`[verix] /verix review requested on PR #${prNumber} by @${comment.user?.login ?? "unknown"}`);
+
+  try {
+    // Get PR head ref
+    const { data: pr } = await octokit.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    const ref = (pr as { head: { ref: string } }).head.ref;
+    await runReview(octokit, owner, repo, prNumber, ref);
+  } catch (error) {
+    console.error(`[verix] Error reviewing PR #${prNumber} from comment:`, error);
+    // Post error as comment so user knows
+    await postReviewComment(
+      octokit, owner, repo, prNumber,
+      "Verix encountered an error while reviewing. Please try again."
+    ).catch(() => {});
   }
 });
 
