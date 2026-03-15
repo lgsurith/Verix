@@ -214,20 +214,33 @@ async function resolveUserConfig(installationId?: number): Promise<{
   userProvider: string;
   userAdapter: InferenceAdapter;
   userAgentAdapter: AgentAdapter | null;
+  userReviewRules: string | null;
 }> {
-  // Try to find user-specific config from the installation
   if (installationId) {
     try {
       const user = await getUserByInstallationId(installationId);
-      if (user?.model_provider && user?.api_key_encrypted) {
-        const userProvider = user.model_provider;
-        const userKey = user.api_key_encrypted; // TODO: decrypt in production
+      if (user) {
         const useAgentMode = process.env.VERIX_AGENT_MODE !== "false";
-        console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
+
+        // If user has their own API key, use it
+        if (user.model_provider && user.api_key_encrypted) {
+          const userProvider = user.model_provider;
+          const userKey = user.api_key_encrypted; // TODO: decrypt in production
+          console.log(`[verix] Using @${user.login}'s ${userProvider} key`);
+          return {
+            userProvider,
+            userAdapter: getAdapter(userProvider, { apiKey: userKey }),
+            userAgentAdapter: useAgentMode ? getAgentAdapter(userProvider, { apiKey: userKey }) : null,
+            userReviewRules: user.review_rules,
+          };
+        }
+
+        // User exists but no key — use default adapter, still return their rules
         return {
-          userProvider,
-          userAdapter: getAdapter(userProvider, { apiKey: userKey }),
-          userAgentAdapter: useAgentMode ? getAgentAdapter(userProvider, { apiKey: userKey }) : null,
+          userProvider: provider,
+          userAdapter: adapter,
+          userAgentAdapter: agentAdapter,
+          userReviewRules: user.review_rules,
         };
       }
     } catch (error) {
@@ -235,11 +248,11 @@ async function resolveUserConfig(installationId?: number): Promise<{
     }
   }
 
-  // Fallback to global config from .env
   return {
     userProvider: provider,
     userAdapter: adapter,
     userAgentAdapter: agentAdapter,
+    userReviewRules: null,
   };
 }
 
@@ -260,7 +273,7 @@ async function runReview(
   }
 
   // Resolve which model/key to use (user's BYOK or default)
-  const { userProvider, userAdapter, userAgentAdapter } = await resolveUserConfig(installationId);
+  const { userProvider, userAdapter, userAgentAdapter, userReviewRules } = await resolveUserConfig(installationId);
 
   // Load graph from Neon (source of truth)
   let repoId: string | null = null;
@@ -283,7 +296,13 @@ async function runReview(
   }
 
   // Load repo-specific config (VERIX.md, .verix.yml)
+  // Priority: repo VERIX.md > user DB rules > defaults
   const config = await loadRepoConfig(octokit, owner, repo, ref);
+  if (!config.reviewRules && userReviewRules) {
+    config.reviewRules = userReviewRules;
+    config.rulesSource = "user settings";
+    console.log("[verix] Using review rules from user settings");
+  }
   const customRules = buildRulesPrompt(config);
 
   let summary: string;

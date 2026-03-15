@@ -48,6 +48,7 @@ export async function initDb(): Promise<void> {
       avatar_url         TEXT,
       api_key_encrypted  TEXT,
       model_provider     TEXT,
+      review_rules       TEXT,
       created_at         TIMESTAMPTZ DEFAULT NOW()
     )
   `;
@@ -195,6 +196,7 @@ export interface DbUser {
   avatar_url: string | null;
   api_key_encrypted: string | null;
   model_provider: string | null;
+  review_rules: string | null;
 }
 
 export async function upsertUser(
@@ -230,6 +232,15 @@ export async function updateUserApiKey(
     UPDATE users
     SET model_provider = ${provider}, api_key_encrypted = ${encryptedKey}
     WHERE id = ${userId}
+  `;
+}
+
+export async function updateUserReviewRules(
+  userId: string,
+  rules: string | null
+): Promise<void> {
+  await sql`
+    UPDATE users SET review_rules = ${rules} WHERE id = ${userId}
   `;
 }
 
