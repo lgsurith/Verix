@@ -324,7 +324,7 @@ async function runReview(
   if (!userConfig) {
     await postReviewComment(
       octokit, owner, repo, prNumber,
-      "**Verix** — No API key configured. Please go to your [Verix dashboard](https://verix.in/dashboard/settings) to set up your model provider and API key."
+      `**Verix** — No API key configured. Please set up your model provider and API key at ${process.env.VERIX_DASHBOARD_URL ?? "your Verix dashboard"}/dashboard/settings`
     );
     console.log(`[verix] Skipped PR #${prNumber} — no API key configured`);
     return;

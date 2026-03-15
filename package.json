@@ -8,9 +8,9 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["code-review", "ai", "github-app", "dependency-graph"],
+  "author": "Surith",
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.24.0",
   "dependencies": {
