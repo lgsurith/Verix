@@ -36,11 +36,27 @@ PR changes auth.ts
 - **BYOK** — bring your own API key, encrypted at rest
 - **Self-hostable** — Docker image, bring your own database and model
 
-## Quick start
+## Getting started
 
-### 1. Create your own GitHub App
+There are two ways to use Verix:
 
-Each Verix instance needs its own GitHub App — this is how GitHub authenticates webhooks and API access for your repos.
+### Option A — Use the hosted version
+
+1. Go to [verix.in](https://verix.in) and sign in with GitHub
+2. Install the Verix GitHub App on your repos
+3. Go to Settings — paste your API key and set your model provider
+4. Optionally configure review rules
+5. Open a PR — Verix reviews it automatically
+
+No setup, no servers, no Docker. Your API key is encrypted at rest.
+
+### Option B — Self-host
+
+Run Verix on your own infrastructure. Full control over your data.
+
+#### 1. Create your own GitHub App
+
+Each self-hosted instance needs its own GitHub App — this is how GitHub authenticates webhooks and API access for your repos.
 
 Go to [github.com/settings/apps/new](https://github.com/settings/apps/new) and create an app with:
 
@@ -58,7 +74,7 @@ Go to [github.com/settings/apps/new](https://github.com/settings/apps/new) and c
 
 Download the private key (`.pem` file).
 
-### 2. Set up the environment
+#### 2. Set up the environment
 
 ```bash
 git clone https://github.com/lgsurith/Verix.git
@@ -79,7 +95,7 @@ MODEL_PROVIDER=gemini
 GEMINI_API_KEY=your-key
 ```
 
-### 3. Run
+#### 3. Run
 
 ```bash
 docker compose up -d
@@ -92,7 +108,7 @@ pnpm install
 pnpm dev
 ```
 
-### 4. Install the app
+#### 4. Install the app
 
 Install your GitHub App on your repos. Verix will automatically review new PRs.
 
