@@ -40,7 +40,7 @@ PR changes auth.ts
 
 There are two ways to use Verix:
 
-### Option A — Use the hosted version
+### Option A : Use the hosted version
 
 1. Go to [verix.in](https://verix.in) and sign in with GitHub
 2. Install the Verix GitHub App on your repos
@@ -50,7 +50,7 @@ There are two ways to use Verix:
 
 No setup, no servers, no Docker. Your API key is encrypted at rest.
 
-### Option B — Self-host
+### Option B : Self-host
 
 Run Verix on your own infrastructure. Full control over your data.
 
