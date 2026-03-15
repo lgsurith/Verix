@@ -1,0 +1,14 @@
+node_modules/
+dist/
+
+# Secrets
+.env
+*.pem
+
+# Internal docs
+PLAN.md
+ARCHITECTURE.md
+ARCHITECTURE.pdf
+
+# OS
+.DS_Store

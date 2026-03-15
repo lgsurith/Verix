@@ -1,0 +1,44 @@
+services:
+  verix:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file: .env
+    volumes:
+      - ./private-key.pem:/app/private-key.pem:ro
+    restart: unless-stopped
+
+  # --- Optional services (uncomment what you need) ---
+
+  # Self-hosted Postgres (alternative to Neon)
+  # Set DATABASE_URL=postgresql://verix:verix@postgres:5432/verix in .env
+  #
+  # postgres:
+  #   image: postgres:17-alpine
+  #   environment:
+  #     POSTGRES_USER: verix
+  #     POSTGRES_PASSWORD: verix
+  #     POSTGRES_DB: verix
+  #   volumes:
+  #     - pg_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U verix"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   restart: unless-stopped
+
+  # Local Ollama for free AI reviews (no API key needed)
+  # Set MODEL_PROVIDER=ollama and OLLAMA_URL=http://ollama:11434 in .env
+  #
+  # ollama:
+  #   image: ollama/ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+
+# volumes:
+#   pg_data:
+#   ollama_data:
