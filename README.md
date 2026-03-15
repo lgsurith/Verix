@@ -1,6 +1,12 @@
-# Verix
+<p align="center">
+  <img src="assets/logo.jpeg" alt="Verix" width="120" />
+</p>
 
-AI code reviews that understand your entire codebase, not just the diff.
+<h1 align="center">Verix</h1>
+
+<p align="center">
+  AI code reviews that understand your entire codebase, not just the diff.
+</p>
 
 Verix is an open-source GitHub bot that reviews pull requests using an agentic AI system. Instead of blindly reviewing a diff, it explores your dependency graph to understand how changes affect the rest of your code — then posts inline suggestions directly on the PR.
 
