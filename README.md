@@ -31,7 +31,9 @@ PR changes auth.ts
 - **Dependency-aware** — understands how files connect via imports
 - **Inline suggestions** — posts directly on PR lines with apply-ready fixes
 - **Pluggable models** — Gemini, Claude, OpenAI, or local via Ollama
+- **Re-review on demand** — comment `/verix review` on any PR to trigger a fresh review
 - **Configurable** — drop a `VERIX.md` in your repo to set team review rules
+- **BYOK** — bring your own API key, encrypted at rest
 - **Self-hostable** — Docker image, bring your own database and model
 
 ## Quick start
@@ -45,11 +47,14 @@ Go to [github.com/settings/apps/new](https://github.com/settings/apps/new) and c
 **Permissions:**
 - Repository → Contents: Read
 - Repository → Pull requests: Read & Write
-- Repository → Metadata: Read
+- Repository → Issues: Read
+- Repository → Metadata: Read (mandatory)
 
 **Subscribe to events:**
 - Pull request
 - Push
+- Issue comment
+- Installation
 
 Download the private key (`.pem` file).
 
@@ -215,12 +220,12 @@ src/
 ├── agent/
 │   ├── tools.ts          Tool definitions + executor
 │   └── loop.ts           Agent loop with guardrails
+├── crypto.ts             AES-256-GCM encryption for BYOK keys
 ├── db/
 │   └── index.ts          Neon/Postgres schema + queries
 └── indexer/
     ├── depgraph.ts       Import parser + graph builder
-    ├── crawler.ts         BFS context crawler
-    └── store.ts          In-memory cache
+    └── crawler.ts        BFS context crawler
 ```
 
 ## License
