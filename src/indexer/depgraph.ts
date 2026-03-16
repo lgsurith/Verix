@@ -80,18 +80,23 @@ function resolveImportPath(importPath: string, currentFile: string, allFiles: Se
 
   const basePath = resolved.join("/");
 
-  // Try exact match, then with extensions
-  const candidates = [
-    basePath,
-    basePath + ".ts",
-    basePath + ".tsx",
-    basePath + ".js",
-    basePath + ".jsx",
-    basePath + "/index.ts",
-    basePath + "/index.tsx",
-    basePath + "/index.js",
-    basePath + "/index.jsx",
-  ];
+  // Try exact match, extension swaps, and index files
+  const candidates = [basePath];
+
+  // If import has .js/.jsx extension, also try .ts/.tsx (ESM TypeScript convention)
+  if (basePath.endsWith(".js")) {
+    candidates.push(basePath.replace(/\.js$/, ".ts"), basePath.replace(/\.js$/, ".tsx"));
+  } else if (basePath.endsWith(".jsx")) {
+    candidates.push(basePath.replace(/\.jsx$/, ".tsx"), basePath.replace(/\.jsx$/, ".ts"));
+  }
+
+  // Try adding extensions
+  candidates.push(
+    basePath + ".ts", basePath + ".tsx",
+    basePath + ".js", basePath + ".jsx",
+    basePath + "/index.ts", basePath + "/index.tsx",
+    basePath + "/index.js", basePath + "/index.jsx",
+  );
 
   return candidates.find((c) => allFiles.has(c)) ?? null;
 }
