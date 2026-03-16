@@ -35,3 +35,4 @@ See the README for project structure. Key modules:
 ## Issues
 
 Check [open issues](https://github.com/lgsurith/Verix/issues) for things to work on. Feel free to open a new issue for bugs or feature requests.
+
