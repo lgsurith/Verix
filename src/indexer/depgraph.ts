@@ -33,6 +33,8 @@ const PY_IMPORT_PATTERNS = [
   /^from\s+([\w.]+)\s+import/gm,                      // from foo.bar import x
 ];
 
+const PY_RELATIVE_IMPORT_PATTERN = /^from\s+(\.+[\w.]*)\s+import/gm;  // from . import foo, from .module import bar
+
 const GO_IMPORT_PATTERNS = [
   /^\s*"(.+?)"/gm,                                    // "fmt" or "github.com/pkg/errors"
   /^\s*\w+\s+"(.+?)"/gm,                              // alias "github.com/pkg/errors"
@@ -44,7 +46,7 @@ const RUST_IMPORT_PATTERNS = [
 ];
 
 const JAVA_IMPORT_PATTERNS = [
-  /^import\s+([\w.]+)/gm,                             // import com.example.Foo
+  /^import\s+(?:static\s+)?([\w.]+?)(?:\.\*)?;/gm,   // import com.example.Foo; import static com.example.Foo.BAR; import com.example.*;
 ];
 
 const RUBY_IMPORT_PATTERNS = [
@@ -106,7 +108,47 @@ function resolvePythonImport(importPath: string, allFiles: Set<string>): string 
   const candidates = [
     asPath + ".py",
     asPath + "/__init__.py",
+    "src/" + asPath + ".py",
+    "src/" + asPath + "/__init__.py",
   ];
+  return candidates.find((c) => allFiles.has(c)) ?? null;
+}
+
+function resolvePythonRelativeImport(
+  importPath: string,
+  currentFile: string,
+  allFiles: Set<string>
+): string | null {
+  // Count leading dots for parent directory levels
+  const dotMatch = importPath.match(/^(\.+)(.*)/);
+  if (!dotMatch) return null;
+
+  const dots = dotMatch[1]!.length;
+  const modulePart = dotMatch[2]!.replace(/\./g, "/");
+
+  // Get current file's directory
+  const parts = currentFile.split("/");
+  parts.pop(); // remove filename
+
+  // Go up (dots - 1) directories (one dot = current package)
+  for (let i = 0; i < dots - 1; i++) {
+    parts.pop();
+  }
+
+  const basePath = parts.length > 0 ? parts.join("/") + "/" : "";
+  const fullPath = basePath + modulePart;
+
+  const candidates = [
+    fullPath + ".py",
+    fullPath + "/__init__.py",
+    fullPath,  // might be a directory with __init__.py
+  ];
+
+  // If modulePart is empty (from . import foo), try the current package's __init__.py
+  if (!modulePart) {
+    candidates.push(basePath + "__init__.py");
+  }
+
   return candidates.find((c) => allFiles.has(c)) ?? null;
 }
 
@@ -183,6 +225,16 @@ export function parseImports(content: string, filepath: string, allFiles: Set<st
         const resolved = config.resolver(match[1]!);
         if (resolved) imports.push(resolved);
       }
+    }
+  }
+
+  // Python relative imports (from . import foo, from ..module import bar)
+  if (ext === "py") {
+    const regex = new RegExp(PY_RELATIVE_IMPORT_PATTERN.source, PY_RELATIVE_IMPORT_PATTERN.flags);
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      const resolved = resolvePythonRelativeImport(match[1]!, filepath, allFiles);
+      if (resolved) imports.push(resolved);
     }
   }
 
