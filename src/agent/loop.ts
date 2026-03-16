@@ -144,7 +144,7 @@ Rules for the review:
 - Skip style nitpicks
 - For each issue, specify fix_type:
   - "applyable": direct code fix (provide exact replacement code for lines start_line to end_line)
-  - "recommendation": better approach (provide code example as reference)
+  - "recommendation": better approach (provide real, working code the developer can copy and use — never comment out the code)
   - "warning": text observation only (set suggested_code to null)
 - Severity: "critical" (security/data loss), "high" (bugs), "medium" (logic issues), "low" (minor improvements)
 - Line numbers must be NEW file line numbers (marked as [L1], [L2] in the diff)
