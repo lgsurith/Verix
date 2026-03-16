@@ -15,11 +15,12 @@ export async function initDb(): Promise<void> {
 
   await sql`
     CREATE TABLE IF NOT EXISTS repos (
-      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      full_name   TEXT UNIQUE NOT NULL,
-      head_sha    TEXT,
-      status      TEXT DEFAULT 'pending',
-      indexed_at  TIMESTAMPTZ
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      full_name       TEXT UNIQUE NOT NULL,
+      head_sha        TEXT,
+      status          TEXT DEFAULT 'pending',
+      installation_id INT,
+      indexed_at      TIMESTAMPTZ
     )
   `;
 
@@ -67,7 +68,16 @@ export async function initDb(): Promise<void> {
 
 // --- Repo operations ---
 
-export async function getOrCreateRepo(fullName: string): Promise<string> {
+export async function getOrCreateRepo(fullName: string, installationId?: number): Promise<string> {
+  if (installationId) {
+    const rows = await sql`
+      INSERT INTO repos (full_name, installation_id)
+      VALUES (${fullName}, ${installationId})
+      ON CONFLICT (full_name) DO UPDATE SET installation_id = COALESCE(${installationId}, repos.installation_id)
+      RETURNING id
+    `;
+    return rows[0].id as string;
+  }
   const rows = await sql`
     INSERT INTO repos (full_name)
     VALUES (${fullName})

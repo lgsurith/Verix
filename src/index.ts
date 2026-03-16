@@ -67,12 +67,13 @@ async function indexRepo(
   octokit: OctokitClient,
   owner: string,
   repo: string,
-  ref: string = "HEAD"
+  ref: string = "HEAD",
+  installationId?: number
 ): Promise<void> {
   const fullName = `${owner}/${repo}`;
 
   try {
-    const repoId = await getOrCreateRepo(fullName);
+    const repoId = await getOrCreateRepo(fullName, installationId);
     await dbSetStatus(fullName, "indexing");
 
     console.log(`[verix] Indexing ${fullName}...`);
@@ -119,7 +120,7 @@ app.webhooks.on("installation.created", async ({ payload, octokit }) => {
 
   for (const repo of repos) {
     const [owner, name] = repo.full_name.split("/") as [string, string];
-    indexRepo(octokit, owner, name).catch(() => {});
+    indexRepo(octokit, owner, name, "HEAD", installationId).catch(() => {});
   }
 });
 
@@ -162,11 +163,12 @@ app.webhooks.on("installation_repositories.removed", async ({ payload }) => {
 // Index new repos added to existing installation
 app.webhooks.on("installation_repositories.added", async ({ payload, octokit }) => {
   const added = payload.repositories_added ?? [];
+  const installationId = payload.installation.id;
 
   for (const repo of added) {
     const [owner, name] = repo.full_name.split("/") as [string, string];
     console.log(`[verix] Repo ${repo.full_name} added to installation`);
-    indexRepo(octokit, owner, name).catch(() => {});
+    indexRepo(octokit, owner, name, "HEAD", installationId).catch(() => {});
   }
 });
 
