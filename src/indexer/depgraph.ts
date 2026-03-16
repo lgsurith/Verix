@@ -11,7 +11,14 @@ interface TreeEntry {
   sha: string;
 }
 
-const SUPPORTED_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "py"]);
+const SUPPORTED_EXTENSIONS = new Set([
+  "ts", "tsx", "js", "jsx",  // TypeScript / JavaScript
+  "py",                       // Python
+  "go",                       // Go
+  "rs",                       // Rust
+  "java",                     // Java
+  "rb",                       // Ruby
+]);
 
 // Regex patterns for import parsing
 const TS_IMPORT_PATTERNS = [
@@ -24,6 +31,25 @@ const TS_IMPORT_PATTERNS = [
 const PY_IMPORT_PATTERNS = [
   /^import\s+([\w.]+)/gm,                             // import foo.bar
   /^from\s+([\w.]+)\s+import/gm,                      // from foo.bar import x
+];
+
+const GO_IMPORT_PATTERNS = [
+  /^\s*"(.+?)"/gm,                                    // "fmt" or "github.com/pkg/errors"
+  /^\s*\w+\s+"(.+?)"/gm,                              // alias "github.com/pkg/errors"
+];
+
+const RUST_IMPORT_PATTERNS = [
+  /^use\s+(crate::[\w:]+)/gm,                         // use crate::module::item
+  /^mod\s+(\w+)/gm,                                   // mod module_name
+];
+
+const JAVA_IMPORT_PATTERNS = [
+  /^import\s+([\w.]+)/gm,                             // import com.example.Foo
+];
+
+const RUBY_IMPORT_PATTERNS = [
+  /^require\s+['"](.+?)['"]/gm,                       // require 'foo'
+  /^require_relative\s+['"](.+?)['"]/gm,              // require_relative './foo'
 ];
 
 function getExtension(filepath: string): string {
@@ -79,25 +105,77 @@ function resolvePythonImport(importPath: string, allFiles: Set<string>): string 
   return candidates.find((c) => allFiles.has(c)) ?? null;
 }
 
+function resolveGoImport(importPath: string, allFiles: Set<string>): string | null {
+  // Skip standard library and external packages
+  if (!importPath.includes("/") || importPath.includes(".")) return null;
+  const candidates = allFiles;
+  // Go imports are package-based, try to match directory
+  for (const file of candidates) {
+    if (file.endsWith(".go") && file.includes(importPath)) return file;
+  }
+  return null;
+}
+
+function resolveRustImport(importPath: string, allFiles: Set<string>): string | null {
+  // crate::foo::bar → src/foo/bar.rs or src/foo/bar/mod.rs
+  const parts = importPath.replace("crate::", "").replace(/::/g, "/");
+  const candidates = [
+    `src/${parts}.rs`,
+    `src/${parts}/mod.rs`,
+    `${parts}.rs`,
+    `${parts}/mod.rs`,
+  ];
+  return candidates.find((c) => allFiles.has(c)) ?? null;
+}
+
+function resolveJavaImport(importPath: string, allFiles: Set<string>): string | null {
+  const asPath = importPath.replace(/\./g, "/");
+  const candidates = [
+    `src/main/java/${asPath}.java`,
+    `src/${asPath}.java`,
+    `${asPath}.java`,
+  ];
+  return candidates.find((c) => allFiles.has(c)) ?? null;
+}
+
+function resolveRubyImport(importPath: string, currentFile: string, allFiles: Set<string>): string | null {
+  // require_relative resolves relative to current file
+  if (!importPath.startsWith(".") && !importPath.startsWith("/")) {
+    // require 'foo' → lib/foo.rb or foo.rb
+    const candidates = [
+      `lib/${importPath}.rb`,
+      `${importPath}.rb`,
+    ];
+    return candidates.find((c) => allFiles.has(c)) ?? null;
+  }
+  // Relative path
+  const resolved = resolveImportPath(importPath, currentFile, allFiles);
+  return resolved;
+}
+
 export function parseImports(content: string, filepath: string, allFiles: Set<string>): string[] {
   const ext = getExtension(filepath);
   const imports: string[] = [];
 
-  if (["ts", "tsx", "js", "jsx"].includes(ext)) {
-    for (const pattern of TS_IMPORT_PATTERNS) {
+  const langConfig: Record<string, { patterns: RegExp[]; resolver: (match: string) => string | null }> = {
+    ts: { patterns: TS_IMPORT_PATTERNS, resolver: (m) => resolveImportPath(m, filepath, allFiles) },
+    tsx: { patterns: TS_IMPORT_PATTERNS, resolver: (m) => resolveImportPath(m, filepath, allFiles) },
+    js: { patterns: TS_IMPORT_PATTERNS, resolver: (m) => resolveImportPath(m, filepath, allFiles) },
+    jsx: { patterns: TS_IMPORT_PATTERNS, resolver: (m) => resolveImportPath(m, filepath, allFiles) },
+    py: { patterns: PY_IMPORT_PATTERNS, resolver: (m) => resolvePythonImport(m, allFiles) },
+    go: { patterns: GO_IMPORT_PATTERNS, resolver: (m) => resolveGoImport(m, allFiles) },
+    rs: { patterns: RUST_IMPORT_PATTERNS, resolver: (m) => resolveRustImport(m, allFiles) },
+    java: { patterns: JAVA_IMPORT_PATTERNS, resolver: (m) => resolveJavaImport(m, allFiles) },
+    rb: { patterns: RUBY_IMPORT_PATTERNS, resolver: (m) => resolveRubyImport(m, filepath, allFiles) },
+  };
+
+  const config = langConfig[ext];
+  if (config) {
+    for (const pattern of config.patterns) {
       const regex = new RegExp(pattern.source, pattern.flags);
       let match: RegExpExecArray | null;
       while ((match = regex.exec(content)) !== null) {
-        const resolved = resolveImportPath(match[1]!, filepath, allFiles);
-        if (resolved) imports.push(resolved);
-      }
-    }
-  } else if (ext === "py") {
-    for (const pattern of PY_IMPORT_PATTERNS) {
-      const regex = new RegExp(pattern.source, pattern.flags);
-      let match: RegExpExecArray | null;
-      while ((match = regex.exec(content)) !== null) {
-        const resolved = resolvePythonImport(match[1]!, allFiles);
+        const resolved = config.resolver(match[1]!);
         if (resolved) imports.push(resolved);
       }
     }

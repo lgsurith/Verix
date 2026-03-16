@@ -28,7 +28,7 @@ PR changes auth.ts
 ## Features
 
 - **Agentic review** — AI decides what context it needs, not a fixed crawl
-- **Dependency-aware** — understands how files connect via imports
+- **Dependency-aware** — understands how files connect via imports (TypeScript, JavaScript, Python, Go, Rust, Java, Ruby)
 - **Inline suggestions** — posts directly on PR lines with apply-ready fixes
 - **Pluggable models** — Gemini, Claude, OpenAI, or local via Ollama
 - **Re-review on demand** — comment `/verix review` on any PR to trigger a fresh review
