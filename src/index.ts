@@ -24,6 +24,7 @@ import {
   storeEdges,
   deleteAllEdges,
   deleteEdgesForFiles,
+  deleteRepo,
   loadGraphFromDb,
   getRepoByName,
   getIndexedFiles,
@@ -148,14 +149,10 @@ app.webhooks.on("installation_repositories.removed", async ({ payload }) => {
     console.log(`[verix] Repo ${fullName} removed from installation`);
 
     try {
-      const dbRepo = await getRepoByName(fullName);
-      if (dbRepo) {
-        await deleteAllEdges(dbRepo.id);
-        await dbSetStatus(fullName, "removed");
-        console.log(`[verix] Cleaned up dep graph for ${fullName}`);
-      }
+      await deleteRepo(fullName);
+      console.log(`[verix] Deleted repo ${fullName}`);
     } catch (error) {
-      console.error(`[verix] Failed to clean up ${fullName}:`, error);
+      console.error(`[verix] Failed to delete ${fullName}:`, error);
     }
   }
 });

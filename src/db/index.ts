@@ -105,6 +105,11 @@ export async function setRepoStatus(
   }
 }
 
+export async function deleteRepo(fullName: string): Promise<void> {
+  // file_edges cascade-deletes via FK on repos.id
+  await sql`DELETE FROM repos WHERE full_name = ${fullName}`;
+}
+
 export async function getRepoStatus(fullName: string): Promise<string | null> {
   const rows = await sql`
     SELECT status FROM repos WHERE full_name = ${fullName}
@@ -268,6 +273,8 @@ export async function linkInstallation(
 }
 
 export async function removeInstallation(installationId: number): Promise<void> {
+  // Delete repos (edges cascade-delete via FK on repos.id)
+  await sql`DELETE FROM repos WHERE installation_id = ${installationId}`;
   await sql`DELETE FROM installations WHERE installation_id = ${installationId}`;
 }
 
