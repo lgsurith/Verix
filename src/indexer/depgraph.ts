@@ -62,7 +62,31 @@ function isSupported(filepath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(getExtension(filepath));
 }
 
+// Common path alias prefixes and their typical resolutions
+const PATH_ALIAS_PREFIXES = ["@/", "~/"];
+
 function resolveImportPath(importPath: string, currentFile: string, allFiles: Set<string>): string | null {
+  // Handle path aliases (@/, ~/) — try common source directories
+  const aliasPrefix = PATH_ALIAS_PREFIXES.find((p) => importPath.startsWith(p));
+  if (aliasPrefix) {
+    const stripped = importPath.slice(aliasPrefix.length);
+    // Try common source roots: src/, app/, lib/, or root
+    const roots = ["src/", "app/", "lib/", ""];
+    for (const root of roots) {
+      const basePath = root + stripped;
+      const candidates = [
+        basePath,
+        basePath + ".ts", basePath + ".tsx",
+        basePath + ".js", basePath + ".jsx",
+        basePath + "/index.ts", basePath + "/index.tsx",
+        basePath + "/index.js", basePath + "/index.jsx",
+      ];
+      const match = candidates.find((c) => allFiles.has(c));
+      if (match) return match;
+    }
+    return null;
+  }
+
   // Skip external packages (no relative path indicator)
   if (!importPath.startsWith(".") && !importPath.startsWith("/")) return null;
 
