@@ -149,9 +149,13 @@ function parseModelResponse(raw: string): ModelResponse {
 export async function reviewPR(
   adapter: InferenceAdapter,
   files: PRFile[],
-  contextFiles?: ContextFile[]
+  contextFiles?: ContextFile[],
+  customRules?: string
 ): Promise<{ summary: string; comments: ReviewComment[] }> {
-  const prompt = buildPrompt(files, contextFiles);
+  let prompt = buildPrompt(files, contextFiles);
+  if (customRules) {
+    prompt += customRules;
+  }
 
   if (contextFiles && contextFiles.length > 0) {
     console.log(`[verix] Prompt includes ${contextFiles.length} context file(s): ${contextFiles.map((f) => f.path).join(", ")}`);

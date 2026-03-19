@@ -137,7 +137,9 @@ Strategy:
 2. Use get_imports to see what the changed files depend on
 3. Use get_dependents to see what depends on the changed files (blast radius)
 4. Use get_file_content to read important related files
-5. When you have enough context, call submit_review
+5. When you have enough context, call submit_review with your findings
+
+IMPORTANT: You MUST always call the submit_review tool to deliver your review. Never write the review as plain text.
 
 Rules for the review:
 - Only flag real issues (bugs, security holes, missing error handling)
@@ -211,8 +213,16 @@ export async function agentReview(
 
     const response = await adapter.chat(messages, TOOLS);
 
-    // No tool calls — model is done
+    // No tool calls — model responded with text instead of a tool call
     if (!response.toolCalls || response.toolCalls.length === 0) {
+      // Try to parse the text response as a review (fallback for when model skips submit_review)
+      if (response.message) {
+        const fallback = tryParseTextAsReview(response.message, files.length);
+        if (fallback) {
+          console.log(`[verix] Agent returned text instead of tool call — parsed as fallback (turn ${turn + 1})`);
+          return fallback;
+        }
+      }
       console.log(`[verix] Agent finished without submit_review (turn ${turn + 1})`);
       return {
         summary: "Verix review completed but no structured review was submitted.",
@@ -276,6 +286,28 @@ export async function agentReview(
 }
 
 // --- Parse the submit_review tool call into ReviewComments ---
+
+// Fallback: try to extract review JSON from plain text when model skips tool calling
+function tryParseTextAsReview(
+  text: string,
+  fileCount: number
+): { summary: string; comments: ReviewComment[] } | null {
+  try {
+    // Try to find JSON in the text (model sometimes dumps JSON without using the tool)
+    const jsonMatch = text.match(/\{[\s\S]*"summary"[\s\S]*"reviews"[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.summary || !Array.isArray(parsed.reviews)) return null;
+
+    return parseSubmitReview(
+      { summary: parsed.summary, reviews: parsed.reviews },
+      fileCount
+    );
+  } catch {
+    return null;
+  }
+}
 
 function parseSubmitReview(
   args: Record<string, unknown>,

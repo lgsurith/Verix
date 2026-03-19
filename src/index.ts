@@ -381,7 +381,7 @@ async function runReview(
       console.log(`[verix] Found ${contextFiles.length} related file(s) for context`);
     }
     console.log(`[verix] Reviewing ${files.length} file(s) with ${userProvider}...`);
-    ({ summary, comments } = await reviewPR(userAdapter, files, contextFiles));
+    ({ summary, comments } = await reviewPR(userAdapter, files, contextFiles, customRules || undefined));
   }
 
   if (comments.length > 0) {
